@@ -59,13 +59,13 @@
     </None>
   </ItemGroup>
   <ItemGroup>
-    <Image Include="res\FirstTask.ico">
-      <Filter>Файлы ресурсов</Filter>
-    </Image>
     <Image Include="res\Toolbar.bmp">
       <Filter>Файлы ресурсов</Filter>
     </Image>
     <Image Include="res\Toolbar256.bmp">
+      <Filter>Файлы ресурсов</Filter>
+    </Image>
+    <Image Include="res\FirstTask.ico">
       <Filter>Файлы ресурсов</Filter>
     </Image>
   </ItemGroup>
