@@ -50,93 +50,92 @@ class CFiFo :
 	public IReadFiFo<T>
 {
 private:
-	size_t count = 2;
-	size_t free_size = 2;
-	size_t ready_size = 0;
+	size_t m_size = 2;
+	size_t m_free_size = 2;
+	size_t m_ready_size = 0;
 
-	list<T>  *elements = nullptr;
-	list<T*> *free = nullptr;
-	list<T*> *ready = nullptr;
+	list<T>  *m_elements = nullptr;
+	list<T*> *m_free = nullptr;
+	list<T*> *m_ready = nullptr;
 
-	std::mutex free_mtx, ready_mtx;
+	std::mutex m_free_mtx, m_ready_mtx;
 public:
 	template<class ...Args>
-	CFiFo(size_t _count = 2, Args... args) :
-		count(_count),
-		free_size(_count),
-		elements(new list<T>(count)),
-		free(new list<T*>(count)),
-		ready(new list<T*>(count))
+	CFiFo(size_t size = 2, Args... args) :
+		m_size(size),
+		m_free_size(size),
+		m_elements(new list<T>(size)),
+		m_free(new list<T*>(size)),
+		m_ready(new list<T*>(size))
 	{
-		for (size_t i = 0; i < count; i++) {
+		for (size_t i = 0; i < size; i++) {
 
-			elements->emplace(elements->begin(), std::forward<decltype(args)>(args)...);
-			free->push_front((&elements->front()));
+			m_elements->emplace(m_elements->begin(), std::forward<decltype(args)>(args)...);
+			m_free->push_front((&m_elements->front()));
 		}
 	}
 
 
 	virtual T* GetFree() override {
-		std::lock_guard<std::mutex> lock_free(free_mtx);
-		if (free_size < 1) {
+		std::lock_guard<std::mutex> lock_free(m_free_mtx);
+		if (m_free_size < 1) {
 			return nullptr;
 		}
 
-		return free->front();
+		return m_free->front();
 	}
 	virtual void AddReady() override {
-		std::lock_guard<std::mutex> lock_ready(ready_mtx), lock_free(free_mtx);
+		std::lock_guard<std::mutex> lock_ready(m_ready_mtx), lock_free(m_free_mtx);
 
-		auto it = ready->begin();
-		std::advance(it, ready_size);
-		ready->insert(it, free->front());
-		free->pop_front();
+		auto it = m_ready->begin();
+		std::advance(it, m_ready_size);
+		m_ready->insert(it, m_free->front());
+		m_free->pop_front();
 
-		free_size--;
-		ready_size++;
+		m_free_size--;
+		m_ready_size++;
 	}
 
 
 	virtual T* GetReady() override {
-		std::lock_guard<std::mutex> lock_ready(ready_mtx);
-		if (ready_size < 1) {
+		std::lock_guard<std::mutex> lock_ready(m_ready_mtx);
+		if (m_ready_size < 1) {
 			return nullptr;
 		}
 
-		return ready->front();
+		return m_ready->front();
 	}
 	virtual void AddFree() override {
-		std::lock_guard<std::mutex> lock_ready(ready_mtx), lock_free(free_mtx);
-		if (ready_size > 1 || count < 3) {
+		std::lock_guard<std::mutex> lock_ready(m_ready_mtx), lock_free(m_free_mtx);
 
-			auto it = free->begin();
-			std::advance(it, free_size);
-			free->insert(it, ready->front());
 
-			ready->pop_front();
+		auto it = m_free->begin();
+		std::advance(it, m_free_size);
+		m_free->insert(it, m_ready->front());
 
-			free_size++;
-			ready_size--;
-		}
+		m_ready->pop_front();
+
+		m_free_size++;
+		m_ready_size--;
 	}
 
 	virtual ~CFiFo() {
-		std::lock_guard<std::mutex> lock_ready(ready_mtx), lock_free(free_mtx);
-		elements->resize(0);
-		delete elements;
-		delete ready;
-		delete free;
+		std::lock_guard<std::mutex> lock_ready(m_ready_mtx), lock_free(m_free_mtx);
+		m_elements->resize(0);
+		delete m_elements;
+		delete m_ready;
+		delete m_free;
 	}
 
 	inline size_t getFreeSize() const {
-		return free_size;
+		return m_free_size;
 	}
 
 	inline size_t getReadySize() const {
-		return ready_size;
+		return m_ready_size;
 	}
-	inline size_t getSize() const{
-		return count;
+	inline size_t getSize() const {
+		return m_size;
 	}
 };
 
