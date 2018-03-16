@@ -9,6 +9,8 @@ private:
 	RGBQUAD * img = nullptr;
 	
 	std::mutex img_mtx; // because object can be deleted while draw/generate img
+	BITMAPINFO bif;
+	void genBitmapInfo();
 public:
 	CMyImage(size_t _width = 512, size_t _height = 512, RGBQUAD _startColor = { 0, 0, 0, 0 });
 

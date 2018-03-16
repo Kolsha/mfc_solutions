@@ -2,12 +2,24 @@
 #include "CMyImage.h"
 
 
+void CMyImage::genBitmapInfo()
+{
+		ZeroMemory(&bif, sizeof(BITMAPINFO));
+		bif.bmiHeader.biSize = sizeof(bif);
+		bif.bmiHeader.biHeight = -long(height);
+		bif.bmiHeader.biWidth = long(width);
+		bif.bmiHeader.biSizeImage = ((bif.bmiHeader.biWidth * 24 + 31) & ~31) / 8 * bif.bmiHeader.biHeight;
+		bif.bmiHeader.biPlanes = 1;
+		bif.bmiHeader.biBitCount = sizeof(RGBQUAD) * 8;
+}
+
 CMyImage::CMyImage(size_t _width, size_t _height, RGBQUAD _startColor) :
 	startColor(_startColor),
-	width(_width), height(_height),
+	width(_width), 
+	height(_height),
 	img(new RGBQUAD[width * height])
 {
-
+	genBitmapInfo();
 }
 
 
@@ -18,6 +30,7 @@ CMyImage::CMyImage(const CMyImage & other) :
 	img(new RGBQUAD[width * height])
 {
 	std::memcpy(img, other.img, (sizeof(RGBQUAD) * width * height));
+	genBitmapInfo();
 }
 
 CMyImage::CMyImage(CMyImage && other)
@@ -31,6 +44,7 @@ CMyImage::CMyImage(CMyImage && other)
 		img = other.img;
 		other.img = nullptr;
 	}
+	genBitmapInfo();
 }
 
 CMyImage & CMyImage::operator=(const CMyImage & other)
@@ -47,6 +61,7 @@ CMyImage & CMyImage::operator=(const CMyImage & other)
 		img = new RGBQUAD[width * height];
 		std::memcpy(img, other.img, (sizeof(RGBQUAD) * width * height));
 	}
+	genBitmapInfo();
 	return *this;
 }
 
@@ -64,6 +79,7 @@ CMyImage & CMyImage::operator=(CMyImage && other)
 		img = other.img;
 		other.img = nullptr;
 	}
+	genBitmapInfo();
 	return *this;
 }
 
@@ -71,20 +87,6 @@ CMyImage & CMyImage::operator=(CMyImage && other)
 void CMyImage::DrawImage(CPaintDC & dc)
 {
 	std::lock_guard<std::mutex> lock(img_mtx);
-	BITMAPINFO bif;
-
-	{
-
-		ZeroMemory(&bif, sizeof(BITMAPINFO));
-		bif.bmiHeader.biSize = sizeof(bif);
-		bif.bmiHeader.biHeight = -long(height);
-		bif.bmiHeader.biWidth = long(width);
-		bif.bmiHeader.biSizeImage = ((bif.bmiHeader.biWidth * 24 + 31) & ~31) / 8 * bif.bmiHeader.biHeight;
-		bif.bmiHeader.biPlanes = 1;
-		bif.bmiHeader.biBitCount = sizeof(RGBQUAD) * 8;
-	}
-
-	
 
 	SetDIBitsToDevice(dc, 0, 0, long(width), long(height), 0, 0, 0, UINT(height), img, &bif, DIB_RGB_COLORS);
 }
@@ -99,7 +101,7 @@ void CMyImage::GenerateImage()
 	}
 	std::lock_guard<std::mutex> lock(img_mtx);
 
-	shift += 5;
+	shift += 1;
 
 	//startColor = { BYTE(rand() + shift) , BYTE(rand()) , BYTE(rand()) , BYTE(rand()) };
 	startColor.rgbRed += 1;
