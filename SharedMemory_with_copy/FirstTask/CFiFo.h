@@ -1,6 +1,6 @@
 #pragma once
 
-#include <vector>
+#include <list>
 
 #include <memory>
 
@@ -10,7 +10,7 @@
 
 #include <Windows.h>
 
-using std::vector;
+using std::list;
 using std::string;
 template<typename T> using s_ptr = std::shared_ptr<T>;
 
@@ -22,8 +22,7 @@ class IWriteFiFo
 public:
 	IWriteFiFo() {}
 
-	virtual T* GetFree() = 0;
-	virtual void AddReady() = 0;
+	virtual bool Insert(const T* elem) = 0;
 
 	virtual ~IWriteFiFo() {}
 };
@@ -36,8 +35,7 @@ class IReadFiFo
 public:
 	IReadFiFo() {}
 
-	virtual T* GetReady() = 0;
-	virtual void AddFree() = 0;
+	virtual bool GetReady(const T* elem) = 0;
 
 	virtual ~IReadFiFo() {};
 };
@@ -47,7 +45,7 @@ public:
 
 namespace {
 	struct shmemq_info {
-		unsigned long max_count;
+		unsigned long max_size;
 		unsigned long read_index;
 		unsigned long write_index;
 		char data[1];
@@ -70,7 +68,13 @@ private:
 
 	unsigned long m_max_count = 2;
 	unsigned int m_element_size = sizeof(T);
+	
+	
 	unsigned long m_mmap_size = 0;
+
+	volatile unsigned long m_max_size = 0;
+	volatile unsigned long m_read_index = 0;
+	volatile unsigned long m_write_index = 0;
 
 
 	string m_prefix;
@@ -86,9 +90,10 @@ private:
 	void updateCounters() {
 		if (m_mem == nullptr)
 			return;
+		
+		m_read_index = m_mem->read_index % m_max_size;
+		m_write_index = m_mem->write_index  % m_max_size;
 	}
-
-	vector<T*> m_els;
 
 public:
 	CFiFo(unsigned int element_len,
@@ -100,7 +105,7 @@ public:
 		m_prefix(prefix),
 		m_need_clear(need_clear)
 	{
-
+		
 	}
 
 	bool Init() {
@@ -108,8 +113,8 @@ public:
 		if (m_initialized)
 			return true;
 
-		unsigned long max_size = m_max_count * m_element_size;
-		m_mmap_size = max_size + sizeof(shmemq_info) - 1;
+		m_max_size = m_max_count * m_element_size;
+		m_mmap_size = m_max_size + sizeof(shmemq_info) - 1;
 
 		m_mutex = ::CreateMutexA(NULL, FALSE, (string("mutex_" + m_prefix).c_str()));
 		if (m_mutex == NULL)
@@ -142,113 +147,87 @@ public:
 		DWORD last_error = GetLastError();
 
 		if (last_error == ERROR_ALREADY_EXISTS) {
-			m_max_count = m_mem->max_count;
+			m_initialized = true;
+			updateCounters();
+			m_max_size = m_mem->max_size;
+			::ReleaseMutex(m_mutex);
+			return true;
 		}
-		else {
-			m_mem->max_count = m_max_count;
-		}
+
+		m_mem->max_size = m_max_size;
 		m_mem->read_index = m_mem->write_index = 0;
 		m_initialized = true;
 		updateCounters();
-
-		for (size_t i = 0; i < m_max_count; i++) {
-			m_els->push_back((T*)&m_mem->data[i *m_element_size]);// push_front();
-		}
-		m_mem->free_count = m_mem->max_count;
 
 		::ReleaseMutex(m_mutex);
 		return true;
 
 	}
+	
 
+	virtual bool Insert(const T* elem) override {
 
-	virtual T* GetFree() override {
-		if (!m_initialized)
-			return nullptr;
+		if (!m_initialized || elem == nullptr)
+			return false;
 
 		try {
 			WaitForSingleObject(m_mutex, INFINITE);
+			
 
-			if (m_mem->write_index >= m_mem->max_size) {
+			if (m_mem->write_index - m_mem->read_index >= m_mem->max_size) {
+
 				::ReleaseMutex(m_mutex);
-				return nullptr;
+				return false;
 			}
 
 			updateCounters();
 
-			T* res = m_els[m_mem->write_index % m_mem->max_size]
+			memcpy(&m_mem->data[m_mem->write_index % m_mem->max_size], elem, m_element_size);
+
+			m_mem->write_index += m_element_size;
+
 			::ReleaseMutex(m_mutex);
-
-			return res;
-
+			return true;
 		}
 		catch (...) {}
 
 		::ReleaseMutex(m_mutex);
-		return nullptr;
+		return false;
 	}
 
 
-	virtual void AddReady() override {
-		if (!m_initialized)
-			return;
+	virtual bool GetReady(const T* elem) override {
+		if (!m_initialized || elem == nullptr)
+			return false;
 
 		try {
 			WaitForSingleObject(m_mutex, INFINITE);
-
-			m_mem->write_index++;
 			
-		}
-		catch (...) {}
-
-		::ReleaseMutex(m_mutex);
-		return nullptr;
-
-	}
-
-
-	virtual T* GetReady() override {
-		if (!m_initialized)
-			return nullptr;
-
-		try {
-			WaitForSingleObject(m_mutex, INFINITE);
 
 			if (m_mem->read_index >= m_mem->write_index) {
+
 				::ReleaseMutex(m_mutex);
-				return nullptr;
+				return false; 
 			}
 
 			updateCounters();
 
-			T* res = m_els[m_mem->read_index % m_mem->max_size];
+			memcpy((void*)(elem), &m_mem->data[m_mem->read_index % m_mem->max_size], m_element_size);
+			m_mem->read_index += m_element_size;
+
 			::ReleaseMutex(m_mutex);
-
-			return res;
+			return true;
 
 		}
 		catch (...) {}
 
 		::ReleaseMutex(m_mutex);
-		return nullptr;
+		return false;
 	}
 
-	virtual void AddFree() override {
-		if (!m_initialized)
-			return;
-
-		try {
-			WaitForSingleObject(m_mutex, INFINITE);
-			m_mem->read_index++;
-		}
-		catch (...) {}
-
-		::ReleaseMutex(m_mutex);
-		return nullptr;
-	}
 
 	virtual ~CFiFo() {
-
+		
 		if (m_mem != NULL && m_need_clear) {
 			::UnmapViewOfFile(m_mem);
 
@@ -259,7 +238,7 @@ public:
 	}
 
 	inline unsigned long getFreeSize() const {
-
+		
 		return m_write_index;
 	}
 

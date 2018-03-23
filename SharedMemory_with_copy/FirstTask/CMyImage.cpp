@@ -13,12 +13,6 @@ void CMyImage::genBitmapInfo()
 		bif.bmiHeader.biBitCount = sizeof(RGBQUAD) * 8;
 }
 
-CMyImage::CMyImage(RGBQUAD *memory, size_t _width, size_t _height)
-{
-	img = memory;
-	need_delete = false;
-}
-
 CMyImage::CMyImage(size_t _width, size_t _height, RGBQUAD _startColor) :
 	startColor(_startColor),
 	width(_width), 
@@ -58,13 +52,13 @@ CMyImage & CMyImage::operator=(const CMyImage & other)
 	if (this != &other)
 	{
 		std::lock_guard<std::mutex> lock(img_mtx);
+		delete[] img;
+
 		width = other.width;
 		height = other.height;
 		startColor = other.startColor;
-		if (need_delete) {
-			delete[] img;
-			img = new RGBQUAD[width * height];
-		}
+
+		img = new RGBQUAD[width * height];
 		std::memcpy(img, other.img, (sizeof(RGBQUAD) * width * height));
 	}
 	genBitmapInfo();
@@ -76,8 +70,7 @@ CMyImage & CMyImage::operator=(CMyImage && other)
 	if (this != &other)
 	{
 		std::lock_guard<std::mutex> lock(img_mtx);
-		if(need_delete)
-			delete[] img;
+		delete[] img;
 
 		width = other.width;
 		height = other.height;
@@ -90,21 +83,6 @@ CMyImage & CMyImage::operator=(CMyImage && other)
 	return *this;
 }
 
-
-void CMyImage::SetMem(RGBQUAD * memory, bool _need_delete, size_t _width, size_t _height)
-{
-	if (img != nullptr && need_delete) {
-		delete[] img;
-	}
-
-	img = memory;
-	need_delete = _need_delete;
-
-	if(_width > 0)
-		width = _width;
-	if(_height > 0)
-		height = _height;
-}
 
 void CMyImage::DrawImage(CPaintDC & dc)
 {
@@ -155,8 +133,6 @@ void CMyImage::GenerateImage()
 
 CMyImage::~CMyImage()
 {
-	if (need_delete) {
-		std::lock_guard<std::mutex> lock(img_mtx);
-		delete[] img;
-	}
+	std::lock_guard<std::mutex> lock(img_mtx);
+	delete[] img;
 }
