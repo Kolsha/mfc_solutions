@@ -93,6 +93,10 @@ CMyImage & CMyImage::operator=(CMyImage && other)
 
 void CMyImage::SetMem(RGBQUAD * memory, bool _need_delete, size_t _width, size_t _height)
 {
+	if (memory == nullptr) {
+		return;
+	}
+	std::lock_guard<std::mutex> lock(img_mtx);
 	if (img != nullptr && need_delete) {
 		delete[] img;
 	}

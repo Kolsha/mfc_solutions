@@ -47,14 +47,32 @@ public:
 
 namespace {
 	struct shmemq_info {
-		unsigned long max_count;
-		unsigned long read_index;
-		unsigned long write_index;
+		unsigned long max_count = 0;
+
+		unsigned int read_index = 0;
+		unsigned int write_index = 0;
+		
+		unsigned int element_size = 0;
+
 		char data[1];
 	};
 
 }
 
+
+class MFCMutexLocker{
+private:
+	HANDLE m_mutex = INVALID_HANDLE_VALUE;
+public:
+	MFCMutexLocker(HANDLE mutex) : m_mutex(mutex) {
+		::WaitForSingleObject(mutex, INFINITE);
+	}
+
+	virtual ~MFCMutexLocker() {
+		::ReleaseMutex(m_mutex);
+	}
+
+};
 
 
 
@@ -69,8 +87,15 @@ private:
 	volatile bool m_initialized = false;
 
 	unsigned long m_max_count = 2;
+
+	unsigned int m_ready = 0;
+	unsigned int m_free = 0;
+
+
 	unsigned int m_element_size = sizeof(T);
-	unsigned long m_mmap_size = 0;
+
+
+
 
 
 	string m_prefix;
@@ -86,9 +111,11 @@ private:
 	void updateCounters() {
 		if (m_mem == nullptr)
 			return;
+
+		m_ready = m_mem->write_index - m_mem->read_index;
+		m_free =  m_max_count - m_ready;
 	}
 
-	vector<T*> m_els;
 
 public:
 	CFiFo(unsigned int element_len,
@@ -109,54 +136,59 @@ public:
 			return true;
 
 		unsigned long max_size = m_max_count * m_element_size;
-		m_mmap_size = max_size + sizeof(shmemq_info) - 1;
+		unsigned long mmap_size = max_size + sizeof(shmemq_info) - 1;
 
 		m_mutex = ::CreateMutexA(NULL, FALSE, (string("mutex_" + m_prefix).c_str()));
 		if (m_mutex == NULL)
 			return false;
 
-		WaitForSingleObject(m_mutex, INFINITE);
+		//WaitForSingleObject(m_mutex, INFINITE);
+
+		MFCMutexLocker locker(m_mutex);
 
 		shmem = ::CreateFileMappingA(
 			INVALID_HANDLE_VALUE,
 			NULL,
 			PAGE_READWRITE,
 			0,
-			m_mmap_size,
+			mmap_size,
 			string("shared_memory_" + m_prefix).c_str()
 		);
 
 		if (shmem == NULL) {
 
-			::ReleaseMutex(m_mutex);
+			//::ReleaseMutex(m_mutex);
 			return false;
 		}
-		m_mem = (struct shmemq_info*)::MapViewOfFile(shmem, FILE_MAP_ALL_ACCESS, 0, 0, m_mmap_size);
+		m_mem = (struct shmemq_info*)::MapViewOfFile(shmem, FILE_MAP_ALL_ACCESS, 0, 0, mmap_size);
 
 		if (m_mem == NULL) {
 
-			::ReleaseMutex(m_mutex);
+			//::ReleaseMutex(m_mutex);
 			return false;
 		}
 
 		DWORD last_error = GetLastError();
 
 		if (last_error == ERROR_ALREADY_EXISTS) {
+
+			if (m_element_size != m_mem->element_size) {
+				m_need_clear = false;
+				//::ReleaseMutex(m_mutex);
+				return false;
+			}
 			m_max_count = m_mem->max_count;
+
 		}
 		else {
 			m_mem->max_count = m_max_count;
+			m_mem->element_size = m_element_size;
+			m_mem->read_index = m_mem->write_index = 0;
 		}
-		m_mem->read_index = m_mem->write_index = 0;
 		m_initialized = true;
 		updateCounters();
 
-		for (size_t i = 0; i < m_max_count; i++) {
-			m_els->push_back((T*)&m_mem->data[i *m_element_size]);// push_front();
-		}
-		m_mem->free_count = m_mem->max_count;
-
-		::ReleaseMutex(m_mutex);
+		//::ReleaseMutex(m_mutex);
 		return true;
 
 	}
@@ -167,24 +199,31 @@ public:
 			return nullptr;
 
 		try {
-			WaitForSingleObject(m_mutex, INFINITE);
+			MFCMutexLocker locker(m_mutex);
+			//WaitForSingleObject(m_mutex, INFINITE);
 
-			if (m_mem->write_index >= m_mem->max_size) {
-				::ReleaseMutex(m_mutex);
+
+			if (m_mem->write_index - m_mem->read_index >= m_mem->max_count) {
+				//::ReleaseMutex(m_mutex);
 				return nullptr;
 			}
 
 			updateCounters();
 
-			T* res = m_els[m_mem->write_index % m_mem->max_size]
-			::ReleaseMutex(m_mutex);
+			unsigned int pos = (m_mem->write_index % m_mem->max_count) * m_mem->element_size;
+			T* res = (T*)&m_mem->data[pos];
+			//::ReleaseMutex(m_mutex);
+
+			//new
+			m_mem->write_index++;
+			//new
 
 			return res;
 
 		}
 		catch (...) {}
 
-		::ReleaseMutex(m_mutex);
+		//::ReleaseMutex(m_mutex);
 		return nullptr;
 	}
 
@@ -194,16 +233,15 @@ public:
 			return;
 
 		try {
-			WaitForSingleObject(m_mutex, INFINITE);
+			//MFCMutexLocker locker(m_mutex);
+			//WaitForSingleObject(m_mutex, INFINITE);
 
-			m_mem->write_index++;
+			//m_mem->write_index++;
 			
 		}
 		catch (...) {}
 
-		::ReleaseMutex(m_mutex);
-		return nullptr;
-
+		//::ReleaseMutex(m_mutex);
 	}
 
 
@@ -212,24 +250,31 @@ public:
 			return nullptr;
 
 		try {
-			WaitForSingleObject(m_mutex, INFINITE);
+			MFCMutexLocker locker(m_mutex);
+			//WaitForSingleObject(m_mutex, INFINITE);
 
 			if (m_mem->read_index >= m_mem->write_index) {
-				::ReleaseMutex(m_mutex);
+				//::ReleaseMutex(m_mutex);
 				return nullptr;
 			}
 
 			updateCounters();
 
-			T* res = m_els[m_mem->read_index % m_mem->max_size];
-			::ReleaseMutex(m_mutex);
+			unsigned int pos = (m_mem->read_index % m_mem->max_count) * m_mem->element_size;
+			T* res = (T*)&m_mem->data[pos];
+
+			//new 
+			m_mem->read_index++;
+			//new
+
+			//::ReleaseMutex(m_mutex);
 
 			return res;
 
 		}
 		catch (...) {}
 
-		::ReleaseMutex(m_mutex);
+		//::ReleaseMutex(m_mutex);
 		return nullptr;
 	}
 
@@ -238,13 +283,13 @@ public:
 			return;
 
 		try {
-			WaitForSingleObject(m_mutex, INFINITE);
-			m_mem->read_index++;
+			///MFCMutexLocker locker(m_mutex);
+			//WaitForSingleObject(m_mutex, INFINITE);
+			//m_mem->read_index++;
 		}
 		catch (...) {}
 
-		::ReleaseMutex(m_mutex);
-		return nullptr;
+		//::ReleaseMutex(m_mutex);
 	}
 
 	virtual ~CFiFo() {
@@ -260,15 +305,16 @@ public:
 
 	inline unsigned long getFreeSize() const {
 
-		return m_write_index;
+		return m_free;
 	}
 
 	inline unsigned long getReadySize() const {
-		return m_read_index;
+		return m_ready;
 	}
 	inline unsigned long getSize() const {
-		return m_max_size;
+		return m_max_count;
 	}
+
 };
 
 
