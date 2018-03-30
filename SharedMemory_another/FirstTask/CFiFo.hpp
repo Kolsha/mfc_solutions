@@ -1,16 +1,7 @@
 #pragma once
 
-#include <vector>
-
-#include <memory>
-
-#include <mutex>
-
-#include <utility>
-
 #include <Windows.h>
 
-using std::vector;
 using std::string;
 template<typename T> using s_ptr = std::shared_ptr<T>;
 
@@ -55,6 +46,7 @@ namespace {
 		unsigned int element_size = 0;
 
 		unsigned int reader_count = 0;
+		unsigned int client_count = 0;
 
 		char data[1];
 	};
@@ -67,11 +59,15 @@ private:
 	HANDLE m_mutex = INVALID_HANDLE_VALUE;
 public:
 	MFCMutexLocker(HANDLE mutex) : m_mutex(mutex) {
-		::WaitForSingleObject(mutex, INFINITE);
+		if (m_mutex != INVALID_HANDLE_VALUE) {
+			::WaitForSingleObject(mutex, INFINITE);
+		}
 	}
 
 	virtual ~MFCMutexLocker() {
-		::ReleaseMutex(m_mutex);
+		if (m_mutex != INVALID_HANDLE_VALUE) {
+			::ReleaseMutex(m_mutex);
+		}
 	}
 
 };
@@ -140,6 +136,8 @@ public:
 		if (m_initialized)
 			return true;
 
+		// Global\\
+
 		unsigned long max_size = m_max_count * m_element_size;
 		unsigned long mmap_size = max_size + sizeof(shmemq_info) - 1;
 
@@ -181,10 +179,13 @@ public:
 		else {
 			m_mem->max_count = m_max_count;
 			m_mem->element_size = m_element_size;
-			m_mem->read_index = m_mem->write_index = 0;
+			m_mem->client_count = m_mem->read_index = m_mem->write_index = 0;
 
 			m_mem->reader_count = 0;
 		}
+
+		m_mem->client_count++;
+
 		m_initialized = true;
 		updateCounters();
 		return true;
@@ -278,14 +279,17 @@ public:
 	virtual ~CFiFo() {
 
 		if (m_mem != NULL) {
-			//MFCMutexLocker locker(m_mutex);
+			MFCMutexLocker locker(m_mutex);
 
 			if (m_iIncrease) {
 				m_mem->reader_count--;
 				m_iIncrease = false;
 			}
 
-			if (m_need_clear) {
+			m_mem->client_count--;
+
+			if (m_need_clear && m_mem->client_count < 1) {
+
 				::UnmapViewOfFile(m_mem);
 
 				::CloseHandle(shmem);
@@ -296,7 +300,6 @@ public:
 	}
 
 	inline unsigned long getFreeSize() const {
-
 		return m_free;
 	}
 

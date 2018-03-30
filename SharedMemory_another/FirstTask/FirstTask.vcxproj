@@ -185,7 +185,7 @@
     </ResourceCompile>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClInclude Include="CFiFo.h" />
+    <ClInclude Include="CFiFo.hpp" />
     <ClInclude Include="CMyImage.h" />
     <ClInclude Include="CMyProgressBar.h" />
     <ClInclude Include="CMyViewer.h" />
@@ -196,7 +196,6 @@
     <ClInclude Include="targetver.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="CFiFo.cpp" />
     <ClCompile Include="CMyImage.cpp" />
     <ClCompile Include="CMyProgressBar.cpp" />
     <ClCompile Include="CMyViewer.cpp" />
